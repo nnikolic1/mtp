@@ -16,9 +16,9 @@ unsigned timeNow() {
 
 using namespace std; 
 
-const unsigned n = 2000;
-const long double t = 4000;
-unsigned m;
+const unsigned n = 50;
+const long double t = n;
+unsigned m,nt=0;
 // Ako se svaka moguća grana dodaje u graf sa verovatnoćom p,
 // svaka neuređena trojka čvorova će činiti trougao sa verovatnoćom p^3,
 // pa je očekivani broj trouglova (n*(n-1)*(n-2)/6)*p^3
@@ -27,6 +27,7 @@ bool adj[n][n];
 vector< tuple<int, int, int> > triangles;
 unsigned lb = 0;
 vector<bool> BnBopt;
+vector< vector<bool> > ti;
 
 bool triangles_intersect(const tuple<int, int, int>& i, const tuple<int, int, int>& j) {
 	return (get<0>(i)==get<0>(j)) || (get<0>(i)==get<1>(j)) || (get<0>(i)==get<2>(j))
@@ -306,16 +307,7 @@ void BnB(const vector<bool>& restricted, vector<bool> x, unsigned i = 0, unsigne
 		x[i] = 1;
 		BnB(restrictedR,x,i+1,ub+1);
 	}
-}
-
-vector<bool> randomVector() {
-	vector<bool> s(m,0);
-	unsigned i;
-	for (i=0;i<m;i++)
-		if ((long double)rand()/RAND_MAX < 0.03)
-			s[i] = 1;
-	return s;
-}
+}*/
 
 vector<bool> randomSolution() {
 	unsigned i,j;
@@ -328,7 +320,7 @@ vector<bool> randomSolution() {
 	for (i=0;i<m;i++) {
 		intersect = 0;
 		for (j=0;j<i;j++)
-			if (s[ind[j]] && triangles_intersect(ind[i],ind[j])) {
+			if (s[ind[j]] && ti[ind[i]][ind[j]]) {
 				intersect = 1;
 				break;
 			}
@@ -338,25 +330,27 @@ vector<bool> randomSolution() {
 	return s;
 }
 
-unsigned fitness(vector<bool> x) {
+void fixSolution(vector<bool>& x) {
+	vector<unsigned> ind(m);
 	unsigned i,j;
 	for (i=0;i<m;i++)
-		if (x[i])
+		ind[i] = i;
+	random_shuffle(ind.begin(),ind.end());
+	for (i=0;i<m;i++)
+		if (x[ind[i]])
 			for (j=i+1;j<m;j++)
-				if (x[j] && triangles_intersect(i,j))
-					return 0;
-	return accumulate(x.begin(),x.end(),0);
+				if (x[ind[j]] && ti[ind[i]][ind[j]])
+					x[ind[j]] = 0;
 }
 
 vector< pair< vector<bool>,unsigned > > generatePopulation() {
 	vector< pair< vector<bool>,unsigned > > population(100);
-	BnBopt = vector<bool>(m,0);
 	unsigned i;
 	for (i=0;i<population.size();i++) {
 		pair< vector<bool>,unsigned > x;
-		auto temp = randomVector();
+		auto temp = randomSolution();
 		x.first = temp;
-		x.second = fitness(temp);
+		x.second = accumulate(temp.begin(),temp.end(),0);
 		population[i] = x;
 	}
 	sort(population.begin(),population.end(),[](pair< vector<bool>,unsigned > x,pair< vector<bool>,unsigned > y){return x.second>y.second;});
@@ -366,49 +360,46 @@ vector< pair< vector<bool>,unsigned > > generatePopulation() {
 	}
 	return population;
  }
+ 
+unsigned select(const vector< pair< vector<bool>,unsigned > >& population, unsigned fitSum) {
+	unsigned i=0,cumSum=population[0].second,r=rand()%fitSum;
+	for (;cumSum<=r;i++)
+		cumSum += population[i+1].second;
+	return i;
+}
 
-void GA(vector< pair< vector<bool>,unsigned > >& population) {
+vector<bool> crossover(const vector<bool>& p1, const vector<bool>& p2) {
+	unsigned i,r=rand()%(m+1);
+	vector<bool> c(m);
+	for (i=0;i<r;i++)
+		c[i] = p1[i];
+	for (;i<m;i++)
+		c[i] = p2[i];
+	if (((long double)rand()/RAND_MAX) < 0.1) {
+		r = rand()%m;
+		c[r] = !c[r];
+	}
+	fixSolution(c);
+	return c;
+}
+
+void GA(vector< pair< vector<bool>,unsigned > > population) {
 	unsigned popSize = population.size();
 	unsigned withoutImprovement = 0;
 	while (withoutImprovement < 100) {
-		unsigned s,r,j;
-		auto p1 = population[rand()%(popSize/2)].first;
-		auto p2 = population[(popSize/2)+rand()%(popSize/2)].first;
-		vector<bool> c1 = vector<bool>(m);
-		vector<bool> c2 = vector<bool>(m);
-		r = rand()%m;
-		s = rand()%m;
-		if (s < r) {
-			auto temp = s;
-			s = r;
-			r = temp;
+		unsigned i,fitSum=0;
+		for (auto s: population)
+			fitSum += s.second;
+		auto newPopulation = vector< pair< vector<bool>,unsigned > >(popSize);
+		for (i=0;i<30;i++)
+			newPopulation[i] = population[i];
+		for (;i<popSize;i++) {
+			auto p1 = population[select(population,fitSum)].first;
+			auto p2 = population[select(population,fitSum)].first;
+			auto c = crossover(p1,p2);
+			newPopulation[i] = make_pair(c,accumulate(c.begin(),c.end(),0));
 		}
-		for (j=0;j<r;j++) {
-			c1[j] = p1[j];
-			c2[j] = p2[j];
-		}
-		for (;j<s;j++) {
-			c1[j] = p2[j];
-			c2[j] = p1[j];
-		}
-		for (;j<m;j++) {
-			c1[j] = p1[j];
-			c2[j] = p2[j];
-		}
-		auto rm = ((long double)rand()/RAND_MAX);
-		if (rm < 0.05) {
-			r = rand()%m;
-			c1[r] = !c1[r];
-		}
-		rm = ((long double)rand()/RAND_MAX);
-		if (rm < 0.05) {
-			r = rand()%m;
-			c2[r] = !c2[r];
-		}
-		auto c1p = make_pair(c1,fitness(c1));
-		auto c2p = make_pair(c2,fitness(c2));
-		population[popSize-2] = c1p;
-		population[popSize-1] = c2p;
+		population = newPopulation;
 		sort(population.begin(),population.end(),[](pair< vector<bool>,unsigned > x,pair< vector<bool>,unsigned > y){return x.second>y.second;});
 		withoutImprovement++;
 		if (population[0].second > lb) {
@@ -417,11 +408,32 @@ void GA(vector< pair< vector<bool>,unsigned > >& population) {
 			withoutImprovement = 0;
 		}
 	}
-}*/
+}
+
+void bruteForce(vector<unsigned> x = vector<unsigned>(), unsigned d = 0) {
+	if (x.size() > lb)
+		lb = x.size();
+	if (d >= m)
+		return;
+	bool f = 1;
+	for (auto s: x)
+		if (ti[d][s]) {
+			f = 0;
+			break;
+		}
+	if (f) {
+		x.push_back(d);
+		bruteForce(x,d+1);
+		x.pop_back();
+		bruteForce(x,d+1);
+	}
+	else
+		bruteForce(x,d+1);
+}
 
 int main() {
 	unsigned i,j,k,t1,t2;
-	srand(timeNow());
+	srand(2);
 	// Slučajno generišemo graf
 	// Svaka moguća grana se dodaje sa verovatnoćom p
 	for (i=0;i<n;i++)
@@ -444,31 +456,44 @@ int main() {
 						triangles.push_back(make_tuple(i,j,k));
 	t2 = timeNow();
 	m = triangles.size();
-	vector< tuple<int, int, int> > temp;
 	cout << m << " trouglova za " << t2-t1 << "ms\n";
+	ti.resize(m);
+	for (i=0;i<m;i++)
+		ti[i].resize(m,0);
+	for (i=0;i<m;i++) {
+		ti[i][i] = 1;
+		for (j=i+1;j<m;j++)
+			if (triangles_intersect(triangles[i],triangles[j])) {
+				ti[i][j] = 1;
+				ti[j][i] = 1;
+			}
+	}
+	vector<bool> included(n,0);
+	for (i=0;i<m;i++) {
+		if (!included[get<0>(triangles[i])]) {
+			included[get<0>(triangles[i])] = 1;
+			nt++;
+		}
+		if (!included[get<1>(triangles[i])]) {
+			included[get<1>(triangles[i])] = 1;
+			nt++;
+		}
+		if (!included[get<2>(triangles[i])]) {
+			included[get<2>(triangles[i])] = 1;
+			nt++;
+		}
+	}
+	nt /= 3;
+	// Testiranje
 	t1 = timeNow();
-	temp = LB1(triangles);
+	bruteForce();
 	t2 = timeNow();
-	cout << "LB1:    " << temp.size() << " za " << t2-t1 << "ms\n";
+	cout << "BF: " << lb << " za " << t2-t1 << "ms\n";
+	lb = 0;
+	BnBopt = vector<bool>(m,0);
 	t1 = timeNow();
-	temp = LBbeta(triangles);
+	GA(generatePopulation());
 	t2 = timeNow();
-	cout << "LBbeta: " << temp.size() << " za " << t2-t1 << "ms\n";
-	/*t1 = timeNow();
-	LB4();
-	t2 = timeNow();
-	cout << "LB4: " << lb << " za " << t2-t1 << "ms\n";*/
-	/*t1 = timeNow();
-	temp = GS();
-	t2 = timeNow();
-	cout << "LB3: " << accumulate(temp.begin(),temp.end(),0) << " za " << t2-t1 << "ms\n";
-	t1 = timeNow();
-	auto pop = generatePopulation();
-	t2 = timeNow();
-	cout << "pop: " << lb << " za " << t2-t1 << "ms\n";
-	t1 = timeNow();
-	GA(pop);
-	t2 = timeNow();
-	cout << "GA: " << lb << " za " << t2-t1 << "ms\n";*/
+	cout << "GA: " << lb << " za " << t2-t1 << "ms\n";
 	return 0;
 }
